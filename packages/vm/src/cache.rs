@@ -3,6 +3,8 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use wat;
+
 use clru::CLruCache;
 use wasmer::{Engine, Instance, Module, Store};
 
@@ -148,20 +150,8 @@ mod tests {
     }
 
     fn wat2wasm(wat: impl AsRef<[u8]>) -> Vec<u8> {
-        let mut input_file = NamedTempFile::new().unwrap();
-        let mut output_file = NamedTempFile::new().unwrap();
-        input_file.write_all(wat.as_ref()).unwrap();
-        Command::new("wat2wasm")
-            .args(&[
-                input_file.path().to_str().unwrap(),
-                "-o",
-                output_file.path().to_str().unwrap(),
-            ])
-            .output()
-            .unwrap();
-        let mut wasm = Vec::new();
-        output_file.read_to_end(&mut wasm).unwrap();
-        wasm
+        let wat_bytes = wat.as_ref();
+        wat::parse_bytes(wat_bytes).unwrap().into_owned()
     }
 
     fn get_instance_without_err(cache: &mut Cache, wasm: &[u8]) -> (Instance, Store, bool) {
