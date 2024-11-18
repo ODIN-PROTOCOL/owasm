@@ -1,10 +1,11 @@
-use crate::error::Error;
-
 use std::borrow::{Borrow, BorrowMut};
 use std::ptr::NonNull;
 use std::sync::{Arc, RwLock};
-use wasmer::{Instance, Memory, WasmerEnv};
-use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
+
+use wasmer::{AsStoreMut, Instance, Memory};
+use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints, set_remaining_points};
+
+use crate::error::Error;
 
 pub trait Querier {
     /// Returns the maximum span size value.
@@ -43,7 +44,6 @@ impl<Q: Querier> ContextData<Q> {
     }
 }
 
-#[derive(WasmerEnv)]
 pub struct Environment<Q>
 where
     Q: Querier + 'static,
@@ -112,9 +112,9 @@ where
         callback(context_data)
     }
 
-    pub fn get_gas_left(&self) -> u64 {
+    pub fn get_gas_left(&self, store: &mut impl AsStoreMut) -> u64 {
         self.with_wasmer_instance(|instance| {
-            Ok(match get_remaining_points(instance) {
+            Ok(match get_remaining_points(store, instance) {
                 MeteringPoints::Remaining(count) => count,
                 MeteringPoints::Exhausted => 0,
             })
@@ -122,20 +122,20 @@ where
         .expect("Wasmer instance is not set. This is a bug in the lifecycle.")
     }
 
-    pub fn set_gas_left(&self, new_value: u64) {
+    pub fn set_gas_left(&self, store: &mut impl AsStoreMut, new_value: u64) {
         self.with_wasmer_instance(|instance| {
-            set_remaining_points(instance, new_value);
+            set_remaining_points(store, instance, new_value);
             Ok(())
         })
         .expect("Wasmer instance is not set. This is a bug in the lifecycle.")
     }
 
-    pub fn decrease_gas_left(&self, gas: u64) -> Result<(), Error> {
-        let gas_left = self.get_gas_left();
+    pub fn decrease_gas_left(&self, store: &mut impl AsStoreMut, gas: u64) -> Result<(), Error> {
+        let gas_left = self.get_gas_left(store);
         if gas > gas_left {
             Err(Error::OutOfGasError)
         } else {
-            self.set_gas_left(gas_left.saturating_sub(gas));
+            self.set_gas_left(store, gas_left.saturating_sub(gas));
             Ok(())
         }
     }
@@ -159,18 +159,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        io::{Read, Write},
-        process::Command,
-    };
-
-    use tempfile::NamedTempFile;
-    use wasmer::{imports, Singlepass, Store, Universal};
-
-    use crate::{
-        cache::{Cache, CacheOptions},
-        store::make_store,
-    };
+    use crate::cache::{Cache, CacheOptions};
+    use crate::store::make_engine;
 
     use super::*;
 
@@ -213,20 +203,8 @@ mod tests {
     }
 
     fn wat2wasm(wat: impl AsRef<[u8]>) -> Vec<u8> {
-        let mut input_file = NamedTempFile::new().unwrap();
-        let mut output_file = NamedTempFile::new().unwrap();
-        input_file.write_all(wat.as_ref()).unwrap();
-        Command::new("wat2wasm")
-            .args(&[
-                input_file.path().to_str().unwrap(),
-                "-o",
-                output_file.path().to_str().unwrap(),
-            ])
-            .output()
-            .unwrap();
-        let mut wasm = Vec::new();
-        output_file.read_to_end(&mut wasm).unwrap();
-        wasm
+        let wat_bytes = wat.as_ref();
+        wat::parse_bytes(wat_bytes).unwrap().into_owned()
     }
 
     #[test]
@@ -249,11 +227,9 @@ mod tests {
                 (func $prepare (export "prepare"))
               )"#,
         );
-        let compiler = Singlepass::new();
-        let store = Store::new(&Universal::new(compiler).engine());
-        let import_object = imports! {};
+        let engine = make_engine();
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let (instance, _) = cache.get_instance(&wasm, &store, &import_object).unwrap();
+        let (instance, _, _) = cache.get_instance(&wasm, engine, env.clone()).unwrap();
         env.set_wasmer_instance(Some(NonNull::from(&instance)));
         assert_eq!(Ok(()), env.with_wasmer_instance(|_| { Ok(()) }));
     }
@@ -267,19 +243,19 @@ mod tests {
                 (func $prepare (export "prepare"))
               )"#,
         );
-        let store = make_store();
-        let import_object = imports! {};
+
+        let engine = make_engine();
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let (instance, _) = cache.get_instance(&wasm, &store, &import_object).unwrap();
+        let (instance, mut store, _) = cache.get_instance(&wasm, engine, env.clone()).unwrap();
         env.set_wasmer_instance(Some(NonNull::from(&instance)));
 
-        assert_eq!(0, env.get_gas_left());
+        assert_eq!(0, env.get_gas_left(&mut store));
 
-        env.set_gas_left(10);
-        assert_eq!(10, env.get_gas_left());
+        env.set_gas_left(&mut store, 10);
+        assert_eq!(10, env.get_gas_left(&mut store));
 
-        assert_eq!(Error::OutOfGasError, env.decrease_gas_left(11).unwrap_err());
-        assert_eq!(Ok(()), env.decrease_gas_left(3));
-        assert_eq!(7, env.get_gas_left());
+        assert_eq!(Error::OutOfGasError, env.decrease_gas_left(&mut store, 11).unwrap_err());
+        assert_eq!(Ok(()), env.decrease_gas_left(&mut store, 3));
+        assert_eq!(7, env.get_gas_left(&mut store));
     }
 }

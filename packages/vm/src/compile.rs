@@ -116,25 +116,10 @@ mod tests {
     use super::*;
 
     use assert_matches::assert_matches;
-    use std::io::{Read, Write};
-    use std::process::Command;
-    use tempfile::NamedTempFile;
 
     fn wat2wasm(wat: impl AsRef<[u8]>) -> Vec<u8> {
-        let mut input_file = NamedTempFile::new().unwrap();
-        let mut output_file = NamedTempFile::new().unwrap();
-        input_file.write_all(wat.as_ref()).unwrap();
-        Command::new("wat2wasm")
-            .args(&[
-                input_file.path().to_str().unwrap(),
-                "-o",
-                output_file.path().to_str().unwrap(),
-            ])
-            .output()
-            .unwrap();
-        let mut wasm = Vec::new();
-        output_file.read_to_end(&mut wasm).unwrap();
-        wasm
+        let wat_bytes = wat.as_ref();
+        wat::parse_bytes(wat_bytes).unwrap().into_owned()
     }
 
     fn get_module_from_wasm(code: &[u8]) -> Module {
@@ -166,7 +151,7 @@ mod tests {
             "0061736d", // magic bytes
             "01000000", // binary version (uint32)
             "05",       // section type (memory)
-            "05",       // section length
+            "07",       // section length
             "02",       // number of memories
             "0009",     // element of type "resizable_limits", min=9, max=unset
             "0009",     // element of type "resizable_limits", min=9, max=unset
@@ -221,16 +206,16 @@ mod tests {
             r#"(module
                 (type (;0;) (func))
                 (func (;0;) (type 0)
-                  (local i32)
+                  (local $idx i32)
                   i32.const 0
-                  local.set 0
+                  local.set $idx
                   block  ;; label = @1
                     loop  ;; label = @2
                       local.get 0
                       i32.const 1
                       i32.add
-                      local.set 0
-                      local.get 0
+                      local.set $idx
+                      local.get $idx
                       i32.const 1000000000
                       i32.lt_u
                       br_if 0 (;@2;)
@@ -351,16 +336,16 @@ mod tests {
                 (type (;1;) (func))
                 (import "env" "ask_external_data" (func (;0;) (type 0)))
                 (func (;1;) (type 1)
-                  (local i32)
+                  (local $idx i32)
                   i32.const 0
-                  local.set 0
+                  local.set $idx
                   block  ;; label = @1
                     loop  ;; label = @2
-                      local.get 0
+                      local.get $idx
                       i32.const 1
                       i32.add
-                      local.set 0
-                      local.get 0
+                      local.set $idx
+                      local.get $idx
                       i32.const 1000000000
                       i32.lt_u
                       br_if 0 (;@2;)

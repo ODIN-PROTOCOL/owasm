@@ -1,11 +1,11 @@
+use std::ptr::NonNull;
+
+use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
+
 use crate::cache::Cache;
 use crate::error::Error;
-use crate::imports::create_import_object;
-use crate::store::make_store;
+use crate::store::make_engine;
 use crate::vm::{Environment, Querier};
-
-use std::ptr::NonNull;
-use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 pub fn run<Q>(
     cache: &mut Cache,
@@ -18,13 +18,12 @@ where
     Q: Querier + 'static,
 {
     let owasm_env = Environment::new(querier);
-    let store = make_store();
-    let import_object = create_import_object(&store, owasm_env.clone());
+    let engine = make_engine();
 
-    let (instance, _) = cache.get_instance(code, &store, &import_object)?;
+    let (instance, mut store, _) = cache.get_instance(code, engine, owasm_env.clone())?;
     let instance_ptr = NonNull::from(&instance);
     owasm_env.set_wasmer_instance(Some(instance_ptr));
-    owasm_env.set_gas_left(gas_limit);
+    owasm_env.set_gas_left(&mut store, gas_limit);
 
     // get function and exec
     let entry = if is_prepare { "prepare" } else { "execute" };
@@ -32,21 +31,21 @@ where
         .exports
         .get_function(entry)
         .unwrap()
-        .native::<(), ()>()
+        .typed::<(), ()>(&mut store)
         .map_err(|_| Error::BadEntrySignatureError)?;
 
-    function.call().map_err(|runtime_err| {
+    function.call(&mut store).map_err(|runtime_err| {
         if let Ok(err) = runtime_err.downcast::<Error>() {
             return err;
         }
 
-        match get_remaining_points(&instance) {
+        match get_remaining_points(&mut store, &instance) {
             MeteringPoints::Remaining(_) => Error::RuntimeError,
             MeteringPoints::Exhausted => Error::OutOfGasError,
         }
     })?;
 
-    match get_remaining_points(&instance) {
+    match get_remaining_points(&mut store, &instance) {
         MeteringPoints::Remaining(count) => Ok(gas_limit.saturating_sub(count)),
         MeteringPoints::Exhausted => Err(Error::OutOfGasError),
     }
@@ -55,12 +54,9 @@ where
 #[cfg(test)]
 mod tests {
     use crate::cache::CacheOptions;
+    use crate::compile::compile;
 
     use super::*;
-    use crate::compile::compile;
-    use std::io::{Read, Write};
-    use std::process::Command;
-    use tempfile::NamedTempFile;
 
     pub struct MockQuerier {}
 
@@ -101,20 +97,8 @@ mod tests {
     }
 
     fn wat2wasm(wat: impl AsRef<[u8]>) -> Vec<u8> {
-        let mut input_file = NamedTempFile::new().unwrap();
-        let mut output_file = NamedTempFile::new().unwrap();
-        input_file.write_all(wat.as_ref()).unwrap();
-        Command::new("wat2wasm")
-            .args(&[
-                input_file.path().to_str().unwrap(),
-                "-o",
-                output_file.path().to_str().unwrap(),
-            ])
-            .output()
-            .unwrap();
-        let mut wasm = Vec::new();
-        output_file.read_to_end(&mut wasm).unwrap();
-        wasm
+        let wat_bytes = wat.as_ref();
+        wat::parse_bytes(wat_bytes).unwrap().into_owned()
     }
 
     #[test]
