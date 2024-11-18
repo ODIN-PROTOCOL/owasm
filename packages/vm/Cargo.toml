@@ -20,4 +20,6 @@ wasm-instrument = { version = "0.4.0", default-features = false, features = [
 wasmer = {version = "=4.3.3", default-features = false, features = ["singlepass", "compiler"]}
 wasmer-middlewares = "=4.3.3"
 wasmer-types = "=4.3.3"
+
+[dev-dependencies]
 wat = "=1.0.34"
