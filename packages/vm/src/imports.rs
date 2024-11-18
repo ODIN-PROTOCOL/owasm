@@ -330,10 +330,7 @@ mod test {
     use crate::compile::compile;
     use crate::store::{make_engine, make_store};
 
-    use std::io::{Read, Write};
-    use std::process::Command;
     use std::ptr::NonNull;
-    use tempfile::NamedTempFile;
     use wasmer::ExternType::Function;
     use wasmer::{FunctionType, Store};
     use wasmer::Instance;
@@ -378,20 +375,8 @@ mod test {
     }
 
     fn wat2wasm(wat: impl AsRef<[u8]>) -> Vec<u8> {
-        let mut input_file = NamedTempFile::new().unwrap();
-        let mut output_file = NamedTempFile::new().unwrap();
-        input_file.write_all(wat.as_ref()).unwrap();
-        Command::new("wat2wasm")
-            .args(&[
-                input_file.path().to_str().unwrap(),
-                "-o",
-                output_file.path().to_str().unwrap(),
-            ])
-            .output()
-            .unwrap();
-        let mut wasm = Vec::new();
-        output_file.read_to_end(&mut wasm).unwrap();
-        wasm
+        let wat_bytes = wat.as_ref();
+        wat::parse_bytes(wat_bytes).unwrap().into_owned()
     }
 
     fn create_owasm_env() -> (Environment<MockQuerier>, Instance, Store) {

@@ -14,11 +14,10 @@ clru = "0.2.0"
 hex = "0.4"
 owasm-crypto = {path = "../crypto", version = "0.3.1"}
 sha2 = "0.9.1"
-tempfile = "3.1.0"
 wasm-instrument = { version = "0.4.0", default-features = false, features = [
   "sign_ext"
 ] }
 wasmer = {version = "=4.3.3", default-features = false, features = ["singlepass", "compiler"]}
 wasmer-middlewares = "=4.3.3"
 wasmer-types = "=4.3.3"
-wat = "1.0"
+wat = "=1.0.34"

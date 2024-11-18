@@ -4,9 +4,6 @@ extern crate owasm_vm;
 use crate::owasm_vm::cache::*;
 use crate::owasm_vm::error::Error;
 use owasm_vm::vm::Querier;
-use std::io::{Read, Write};
-use std::process::Command;
-use tempfile::NamedTempFile;
 
 pub struct MockQuerier {}
 
@@ -47,21 +44,8 @@ impl Querier for MockQuerier {
 }
 
 fn wat2wasm(wat: impl AsRef<[u8]>) -> Vec<u8> {
-    let mut input_file = NamedTempFile::new().unwrap();
-    let mut output_file = NamedTempFile::new().unwrap();
-    input_file.write_all(wat.as_ref()).unwrap();
-    Command::new("wat2wasm")
-        .args(&[
-            input_file.path().to_str().unwrap(),
-            "-o",
-            output_file.path().to_str().unwrap(),
-            "--no-check",
-        ])
-        .output()
-        .unwrap();
-    let mut wasm = Vec::new();
-    output_file.read_to_end(&mut wasm).unwrap();
-    wasm
+    let wat_bytes = wat.as_ref();
+    wat::parse_bytes(wat_bytes).unwrap().into_owned()
 }
 
 fn generate_wat(imported_function: String) -> String {

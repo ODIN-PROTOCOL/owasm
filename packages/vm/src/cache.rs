@@ -3,8 +3,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use wat;
-
 use clru::CLruCache;
 use wasmer::{Engine, Instance, Module, Store};
 
@@ -101,11 +99,6 @@ impl Cache {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Write};
-    use std::process::Command;
-
-    use tempfile::NamedTempFile;
-
     use crate::store::make_engine;
     use crate::vm::Querier;
 
